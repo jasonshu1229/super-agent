@@ -1,5 +1,5 @@
 import "dotenv/config";
-import { generateText } from "ai";
+import { generateText, streamText } from "ai";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createMockModel } from "./mock.model";
 
@@ -13,12 +13,22 @@ const model = process.env.DASHSCOPE_API_KEY
   : createMockModel();
 
 async function main() {
-  const { text } = await generateText({
+  // const { text } = await generateText({
+  //   model,
+  //   prompt: "用一句话介绍你自己",
+  // });
+
+  const result = streamText({
     model,
     prompt: "用一句话介绍你自己",
   });
 
-  console.log(text);
+  for await (const chunk of result.textStream) {
+    // 实时输出生成的文本，连续输出
+    process.stdout.write(chunk);
+  }
+
+  console.log();
 }
 
 main();
