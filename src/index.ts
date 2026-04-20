@@ -1,10 +1,11 @@
 import "dotenv/config";
 import { generateText, ModelMessage, stepCountIs, streamText } from "ai";
 import { createOpenAI } from "@ai-sdk/openai";
-import { createMockModel } from "./mock.model";
+import { createMockModel } from "./mock-model";
 import { createInterface } from "readline"; // 用于创建命令行接口
 import { weatherTool, calculatorTool } from "./tools";
 import { serializeStreamPart } from "./utils";
+import { agentLoop } from "./agent-loop";
 
 const qwen = createOpenAI({
   baseURL: process.env.OPENAI_BASE_URL,
@@ -27,9 +28,10 @@ const messages: ModelMessage[] = [];
 const tools = { get_weather: weatherTool, calculate: calculatorTool };
 
 // 3. 定义 system prompt
-const systemPrompt = `你是 Super Agent，一个专注于软件开发的 AI 助手。
-你说话简洁直接，喜欢用代码示例来解释问题。
-如果用户的问题不够清晰，你会反问而不是瞎猜。`;
+const systemPrompt = `你是 Super Agent，一个有工具调用能力的 AI 助手。
+需要查询信息时，主动使用工具，不要编造数据。
+凡是涉及数值比较、最高温、最低温、温差、加减乘除，都必须调用 calculate 工具，不要自己心算。
+回答要简洁直接。`;
 
 // 4. 定义一个函数来处理用户输入并与模型交互
 function ask() {
@@ -42,42 +44,9 @@ function ask() {
       return;
     }
 
-    // b. 将用户输入添加到消息列表中
     messages.push({ role: "user", content: trimmed });
 
-    // c. 发给模型（调用 streamText 时，SDK 会处理流式输出）
-    const result = streamText({
-      model,
-      system: systemPrompt,
-      messages,
-      tools,
-      stopWhen: stepCountIs(5), // 最多跑 5 步就停下来，防止死循环
-    });
-
-    // d. 流式输出模型回复
-    process.stdout.write("Assistant: ");
-    let fullResponse = "";
-    for await (const part of result.fullStream) {
-      // console.log(`\n[fullStream event]\n${serializeStreamPart(part)}`);
-
-      switch (part.type) {
-        case "text-delta":
-          process.stdout.write(part.text); // 实时输出增量文本
-          fullResponse += part.text; // 累积完整回复
-          break;
-        case "tool-call":
-          console.log(
-            `\n  [调用工具: ${part.toolName}(${JSON.stringify(part.input)})]`,
-          );
-          break;
-        case "tool-result":
-          console.log(`  [工具返回: ${JSON.stringify(part.output)}]`);
-          break;
-      }
-    }
-    console.log();
-
-    messages.push({ role: "assistant", content: fullResponse });
+    await agentLoop(model, tools, messages, systemPrompt);
 
     ask();
   });
