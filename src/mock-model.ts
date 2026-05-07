@@ -1,4 +1,4 @@
-import { serializeStreamPart } from "./utils";
+let retryTestCount = 0;
 
 const TEXT_RESPONSES: Record<string, string> = {
   default:
@@ -173,6 +173,25 @@ export function createMockModel() {
     async doGenerate({ prompt }: any) {
       const text = extractUserText(prompt);
 
+      if (text.includes("测试重试") || text.includes("test retry")) {
+        retryTestCount++;
+        if (retryTestCount <= 2) {
+          throw new Error("429 Too Many Requests - Rate limit exceeded");
+        }
+        retryTestCount = 0;
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: "重试成功！经过几次 429 错误后，我终于回来了。",
+            },
+          ],
+          finishReason: { unified: "stop" as const, raw: undefined },
+          usage: USAGE,
+          warnings: [],
+        };
+      }
+
       const intent = detectToolIntent(prompt);
       if (intent) {
         return {
@@ -189,12 +208,42 @@ export function createMockModel() {
           warnings: [],
         };
       }
+
+      return {
+        content: [{ type: "text" as const, text: pickTextResponse(prompt) }],
+        finishReason: { unified: "stop" as const, raw: undefined },
+        usage: USAGE,
+        warnings: [],
+      };
     },
 
     async doStream({ prompt }: any) {
       const text = extractUserText(prompt);
-      const intent = detectToolIntent(prompt);
 
+      if (text.includes("测试重试") || text.includes("test retry")) {
+        retryTestCount++;
+        if (retryTestCount <= 2) {
+          throw new Error("429 Too Many Requests - Rate limit exceeded");
+        }
+        retryTestCount = 0;
+        const retry = "重试成功！经过几次 429 错误后，我终于回来了。";
+        const id = "text-1";
+        const chunks = [
+          { type: "text-start", id },
+          ...retry
+            .split("")
+            .map((char: string) => ({ type: "text-delta", id, delta: char })),
+          { type: "text-end", id },
+          {
+            type: "finish",
+            finishReason: { unified: "stop", raw: undefined },
+            usage: USAGE,
+          },
+        ];
+        return { stream: createDelayedStream(chunks, 30) };
+      }
+
+      const intent = detectToolIntent(prompt);
       if (intent) {
         const callId = `call-${Date.now()}`;
         const argsJson = JSON.stringify(intent.args);
